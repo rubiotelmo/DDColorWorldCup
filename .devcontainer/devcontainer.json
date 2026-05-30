@@ -1,0 +1,35 @@
+{
+	"name": "devcontainer",
+	"build": {
+		"dockerfile": "Dockerfile"
+	},
+	"mounts": [
+		"source=${localWorkspaceFolderBasename}-codex,target=/home/vscode/.codex,type=volume",
+		"source=${localWorkspaceFolderBasename}-conda,target=/home/vscode/.conda,type=volume"
+	],
+	"customizations": {
+		"vscode": {
+			"settings": {
+				"python.defaultInterpreterPath": "/home/vscode/.conda/envs/ddcolor/bin/python"
+			},
+			"extensions": [
+				"openai.chatgpt",
+				"google.colab",
+				"ms-toolsai.jupyter",
+				"ms-python.python"
+			]
+		}
+	},
+	"remoteUser": "vscode",
+	"containerEnv": {
+		"GIT_AUTHOR_NAME": "${localEnv:DDCOLOR_WORLD_CUP_DEV_GIT_NAME}",
+		"GIT_AUTHOR_EMAIL": "${localEnv:DDCOLOR_WORLD_CUP_DEV_GIT_EMAIL}",
+		"GIT_COMMITTER_NAME": "${localEnv:DDCOLOR_WORLD_CUP_DEV_GIT_NAME}",
+		"GIT_COMMITTER_EMAIL": "${localEnv:DDCOLOR_WORLD_CUP_DEV_GIT_EMAIL}",
+		"LD_LIBRARY_PATH": "/home/vscode/.conda/envs/ddcolor/lib:/home/vscode/.conda/envs/ddcolor/lib/python3.9/site-packages/nvidia/cublas/lib:/home/vscode/.conda/envs/ddcolor/lib/python3.9/site-packages/nvidia/cuda_cupti/lib:/home/vscode/.conda/envs/ddcolor/lib/python3.9/site-packages/nvidia/cuda_nvrtc/lib:/home/vscode/.conda/envs/ddcolor/lib/python3.9/site-packages/nvidia/cuda_runtime/lib:/home/vscode/.conda/envs/ddcolor/lib/python3.9/site-packages/nvidia/cudnn/lib:/home/vscode/.conda/envs/ddcolor/lib/python3.9/site-packages/nvidia/cufft/lib:/home/vscode/.conda/envs/ddcolor/lib/python3.9/site-packages/nvidia/curand/lib:/home/vscode/.conda/envs/ddcolor/lib/python3.9/site-packages/nvidia/cusolver/lib:/home/vscode/.conda/envs/ddcolor/lib/python3.9/site-packages/nvidia/cusparse/lib:/home/vscode/.conda/envs/ddcolor/lib/python3.9/site-packages/nvidia/nccl/lib:/home/vscode/.conda/envs/ddcolor/lib/python3.9/site-packages/nvidia/nvtx/lib:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/cuda/lib64",
+		"NVIDIA_VISIBLE_DEVICES": "all",
+		"NVIDIA_DRIVER_CAPABILITIES": "compute,utility"
+	},
+	"runArgs": ["--name", "ddcolor-world-cup-dev", "--gpus", "all"],
+	"postCreateCommand": "sudo chown -R vscode:vscode /home/vscode/.codex /home/vscode/.conda && .devcontainer/setup-conda-env.sh && git config --global --add safe.directory ${containerWorkspaceFolder}"
+}
