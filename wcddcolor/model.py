@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from huggingface_hub import snapshot_download
 from transformers import CLIPTextModelWithProjection, CLIPTokenizerFast
 
 from basicsr.archs.ddcolor_arch_utils.convnext import ConvNeXt
@@ -55,8 +56,20 @@ class WorldCupDDColor(nn.Module):
         )
 
         self.team_prompt_template = team_prompt_template
-        self.clip_tokenizer = CLIPTokenizerFast.from_pretrained(clip_model_name)
-        clip_text_model = CLIPTextModelWithProjection.from_pretrained(clip_model_name, use_safetensors=True)
+        clip_model_path = snapshot_download(
+            clip_model_name,
+            allow_patterns=[
+                'config.json',
+                'merges.txt',
+                'model.safetensors',
+                'special_tokens_map.json',
+                'tokenizer.json',
+                'tokenizer_config.json',
+                'vocab.json',
+            ],
+        )
+        self.clip_tokenizer = CLIPTokenizerFast.from_pretrained(clip_model_path)
+        clip_text_model = CLIPTextModelWithProjection.from_pretrained(clip_model_path, use_safetensors=True)
         clip_text_model.requires_grad_(False)
         clip_text_model.eval()
         object.__setattr__(self, 'clip_text_model', clip_text_model)
