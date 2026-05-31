@@ -56,7 +56,7 @@ class WorldCupDDColor(nn.Module):
 
         self.team_prompt_template = team_prompt_template
         self.clip_tokenizer = CLIPTokenizerFast.from_pretrained(clip_model_name)
-        clip_text_model = CLIPTextModelWithProjection.from_pretrained(clip_model_name)
+        clip_text_model = CLIPTextModelWithProjection.from_pretrained(clip_model_name, use_safetensors=True)
         clip_text_model.requires_grad_(False)
         clip_text_model.eval()
         object.__setattr__(self, 'clip_text_model', clip_text_model)
