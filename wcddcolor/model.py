@@ -28,7 +28,7 @@ class WorldCupDDColor(nn.Module):
         num_queries=256,
         num_scales=3,
         dec_layers=9,
-        clip_model_name='openai/clip-vit-base-patch32',
+        clip_model_name='laion/CLIP-ViT-B-32-laion2B-s34B-b79K',
         team_prompt_template='{} national football team colors',
     ):
         super().__init__()
