@@ -415,6 +415,85 @@ This scaling step moves the project from a proof-of-concept autoencoder to a pre
 
 ## 7.- Regularizing
 
+The obtained results in the scaled up model can be considered a form of conceptual overfitting, because the model is overlearning the visual characteristics of the images provided for fine-tuning. This is visible in the generated examples: several colors are plausible in terms of hue, but too intense in terms of chroma. Typical cases are very saturated referee kits, overly green grass, and crowd regions that receive stronger color than expected for old football photographs.
+
+Also, the training process takes longer than expected, taking approximately 5 hours for each 30k image epoch. Therefore, regularization is useful for two reasons:
+
+```text
+visual regularization     -> avoid oversaturated and unrealistic chroma
+capacity regularization   -> reduce trainable parameters and speed up experiments
+```
+
+Taking this into account, the following assumptions have been made:
+
+- The performed fine-tuning made the pretrained architecture forget part of the natural-image priors it already had.
+- The vivid colors in modern images make the colorization less realistic for historical World Cup photographs.
+- The team-conditioned branch should guide plausible kit colors, but it should not dominate the whole image.
+
+The architecture used by the notebook is defined in `wcddcolor/model.py`, mainly through `WorldCupDDColor`, `DuelDecoder`, and `MultiScaleColorDecoder`. To preserve the original experiment, the preferred approach is to create a new regularized architecture, for example `RegularizedWorldCupDDColor`, instead of directly replacing the current model. This would allow comparing the original and regularized versions under the same data split and evaluation protocol.
+
+**Minimal Chroma Regularization**
+
+The first regularization target is the chroma magnitude. Since the model predicts color information from luminance, oversaturation usually means that the predicted `AB` vector has too large a magnitude, even when the selected hue is reasonable.
+
+A minimal architectural change is to apply a final chroma scale after the prediction:
+
+```text
+predicted AB -> chroma scale -> regularized AB
+```
+
+For example, a value such as `0.75` or `0.8` can reduce excessive saturation while preserving the model's spatial structure and hue decisions. This is intentionally simple: it does not change the encoder, the decoder, or the team-conditioning path. It only prevents the model from committing too strongly to vivid chroma.
+
+A smoother version can constrain the chroma magnitude instead of scaling every value equally:
+
+```text
+large AB vectors -> softly reduced
+small AB vectors -> mostly preserved
+```
+
+This is preferable to hard clipping because it preserves the hue direction and avoids abrupt color artifacts. In both cases, the purpose is not to make the output gray, but to keep color strength closer to historical-looking photographs.
+
+**Heavier Model Regularization**
+
+The second target is model capacity. The current scaled model starts from pretrained DDColor weights, freezes the image encoder, freezes the CLIP text encoder, and trains the decoder/refinement path together with the new team-conditioning layers. If the model still overfits, the regularized version can freeze more components and reduce the amount of trainable adaptation.
+
+A conservative progression is:
+
+```text
+stage 1 -> freeze image encoder and CLIP text encoder
+stage 2 -> additionally freeze early decoder blocks
+stage 3 -> train only the final refinement/output head and team projection layers
+```
+
+This keeps most of the pretrained DDColor prior intact. The model can still learn World Cup-specific color hints, but it has less freedom to repaint grass, crowds, and backgrounds with modern or overly saturated colors.
+
+The regularized architecture can also reduce decoder complexity:
+
+```text
+fewer color queries
+fewer transformer decoder layers
+smaller decoder hidden/feed-forward dimensions
+light dropout in decoder attention and FFN blocks
+```
+
+For this task, freezing and reducing capacity are preferred over heavy dropout. A small dropout value such as `0.05` can help, especially inside the color decoder, but large dropout may make the colorization unstable or blotchy.
+
+**Regularized Fine-Tuning Strategy**
+
+The recommended first regularized experiment is therefore:
+
+```text
+new model class: RegularizedWorldCupDDColor
+chroma scale: 0.75 - 0.8
+image encoder: frozen
+CLIP text encoder: frozen
+early decoder blocks: frozen or partially frozen
+trainable modules: final refinement head, team projection, optionally last decoder block
+optimizer: AdamW with weight decay
+```
+
+This setup addresses both observed problems. The chroma scale directly reduces oversaturation, while heavier freezing and lower decoder capacity reduce conceptual overfitting and make each experiment cheaper to run. If this version becomes too conservative and produces desaturated predictions, the next step is to unfreeze the last decoder block or raise the chroma scale slightly.
+
 ## 8.- Hyperparameter Tuning
 
 ## 9.- Final Validation
