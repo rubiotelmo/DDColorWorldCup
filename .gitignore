@@ -23,6 +23,7 @@ version.py
 # *.jpg
 *.gif
 *.pth
+*.pt
 *.zip
 *.npy
 

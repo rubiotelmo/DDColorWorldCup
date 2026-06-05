@@ -2,7 +2,7 @@
 
 This directory wraps the added Football World Cup coloring logic. This process follows *universal* deep learning flow, with a clear goal, coloring old black and white Football World Cup images.
 
-add universal flow image
+![Universal DL Flow](../assets/universal_dl_flow.png)
 
 ## 0.- State of the Art
 
@@ -168,7 +168,7 @@ For the simple autoencoder, the main reported metrics are `AB MAE`, `DeltaE AB`,
 As available computing time is limited — around 50-100$ cloud provider credits — a simple but yet effective validation protocol has been selected, the traditional **train test split**. Focusing on the training, the adopted split ratios are:
 
 - 80% train
-- 10% validation
+- 10% validation + Small real old world cup images set (6 images)
 - 10% test
 
 ## 4.- Preparing the Data
@@ -241,7 +241,7 @@ This keeps the visual task unchanged — predict chrominance from luminance — 
 
 ## 5.- Developing a 1st Model
 
-Before adapting DDColor, a first simple model was developed in `simple_ae_world_cup.ipynb`. The goal of this experiment was not to obtain the best possible colorization quality, but to validate the complete learning pipeline with a lightweight architecture: data loading, Lab conversion, train/validation/test split, losses, checkpointing, and visual inspection of predictions.
+Before adapting DDColor, a first simple model was developed in [`simple_ae_world_cup.ipynb`](simple_ae_world_cup.ipynb). The goal of this experiment was not to obtain the best possible colorization quality, but to validate the complete learning pipeline with a lightweight architecture: data loading, Lab conversion, train/validation/test split, losses, checkpointing, and visual inspection of predictions.
 
 The selected baseline is a convolutional autoencoder that receives only the normalized `L` channel and predicts the normalized `AB` channels. Its structure is intentionally minimal:
 
@@ -266,19 +266,24 @@ optimizer: Adam, lr=2e-4
 
 The objective combines three terms from the previously defined baseline loss:
 
-```text
-pixel L1 loss      -> match the target AB channels
-total variation    -> reduce noisy high-frequency chroma
-colorfulness loss  -> discourage fully desaturated predictions
-```
+$$
+\mathcal{L}_{\theta} = \lambda_{pix}\mathcal{L}_{pix} + \lambda_{tv}\mathcal{L}_{tv} + \lambda_{col}\mathcal{L}_{col}
+$$
+
+Where:
+- Pixel L1 loss: match the target AB channels
+- Total variation: reduce noisy high-frequency chroma
+- Colorfulness loss: discourage fully desaturated predictions
 
 During validation, the model is evaluated with objective loss, `AB` MAE, approximate `DeltaE` over the chrominance channels, and RGB PSNR. The notebook also plots the training history and compares grayscale input, predicted colorization, and ground-truth color images.
 
-This first model provides a useful sanity check: if the simple autoencoder cannot learn the basic `L -> AB` mapping or the data pipeline produces wrong colors, then scaling to DDColor would only hide the problem behind a larger architecture. Once this baseline is working, the project can move to pretrained DDColor fine-tuning and later to team-conditioned CLIP embeddings.
+The obtained results are:
+
+![Simple AE Results](../assets/simple_ae_results.png)
 
 ## 6.- Scaling Up
 
-After validating the complete pipeline with the simple autoencoder, the project scales to DDColor. This step is implemented in `ddcolor_world_cup_team_finetune.ipynb`, but it is useful to separate two ideas clearly: the original DDColor architecture and the proposed team-conditioned extension.
+After validating the complete pipeline with the simple autoencoder, the project scales to DDColor. This step is implemented in [`ddcolor_world_cup_team_finetune.ipynb`](./ddcolor_world_cup_team_finetune.ipynb), but it is useful to separate two ideas clearly: the original DDColor architecture and the proposed team-conditioned extension.
 
 **Original DDColor**
 
@@ -325,12 +330,10 @@ piddnad/ddcolor_paper_tiny
 ```
 
 Those weights are copied into `WorldCupDDColor` with `strict=False`. This is necessary because the proposed architecture has extra modules that do not exist in the original checkpoint:
+- Team projection MLP
+- Team cross-attention layers
+- CLIP text-conditioning path
 
-```text
-team projection MLP
-team cross-attention layers
-CLIP text-conditioning path
-```
 
 The unchanged DDColor layers reuse pretrained weights, while the new team-conditioning layers are initialized from scratch. The configured model is:
 
@@ -346,19 +349,12 @@ The image encoder is frozen during fine-tuning. The CLIP text encoder is also fr
 
 **Fine-Tuning Setup**
 
-The notebook writes a separate training script and launches distributed training with `torchrun`:
+The notebook runs fine-tuning directly in the notebook process on a single CUDA GPU and data is loaded with a regular shuffled `DataLoader`.
+
+The fine-tuning configuration is intentionally compact, due to limited resources and time:
 
 ```text
-backend: NCCL
-parallelism: DistributedDataParallel
-```
-
-Each process receives a shard of the training data through `DistributedSampler`. Gradients are synchronized after backward passes, and only the main process performs validation logging and checkpoint saving.
-
-The fine-tuning configuration is intentionally compact:
-
-```text
-epochs: 5
+epochs: 3
 batch size: 4
 learning rate: 1e-4
 seed: 0
@@ -370,12 +366,8 @@ The generator is optimized with AdamW and weight decay, while the discriminator 
 
 The scaled model uses the fuller DDColor-inspired objective instead of the simpler autoencoder objective. For each batch, the model predicts `AB`, reconstructs RGB through the original `L` channel, and optimizes:
 
-```text
-0.1 * AB L1 loss
-+ VGG perceptual loss
-+ adversarial generator loss
-+ colorfulness loss
-```
+$$L_{\theta} = \lambda_{\text{pix}} L_{\text{pix}} + \lambda_{\text{per}} L_{\text{per}} + \lambda_{\text{adv}} L_{\text{adv}} + \lambda_{\text{col}} L_{\text{col}}$$
+
 
 The discriminator is trained separately to distinguish real RGB images from generated RGB images:
 
@@ -403,15 +395,7 @@ checkpoint_team.pt
 best_wcddcolor_team_tiny.pt
 ```
 
-After training, the best checkpoint is loaded for test evaluation. The final visual inspection grid compares:
-
-```text
-grayscale L input
-predicted colorization
-ground-truth color image
-```
-
-This scaling step moves the project from a proof-of-concept autoencoder to a pretrained DDColor model and then to a proposed team-conditioned extension that can use match metadata as semantic color context.
+After training, the best checkpoint is loaded for test evaluation.
 
 ## 7.- Regularizing
 
@@ -419,10 +403,9 @@ The obtained results in the scaled up model can be considered a form of conceptu
 
 Also, the training process takes longer than expected, taking approximately 5 hours for each 30k image epoch. Therefore, regularization is useful for two reasons:
 
-```text
-visual regularization     -> avoid oversaturated and unrealistic chroma
-capacity regularization   -> reduce trainable parameters and speed up experiments
-```
+- **Visual regularization**: avoid oversaturated and unrealistic chroma
+- **Capacity regularization**: reduce trainable parameters and speed up experiments
+
 
 Taking this into account, the following assumptions have been made:
 
@@ -430,70 +413,142 @@ Taking this into account, the following assumptions have been made:
 - The vivid colors in modern images make the colorization less realistic for historical World Cup photographs.
 - The team-conditioned branch should guide plausible kit colors, but it should not dominate the whole image.
 
-The architecture used by the notebook is defined in `wcddcolor/model.py`, mainly through `WorldCupDDColor`, `DuelDecoder`, and `MultiScaleColorDecoder`. To preserve the original experiment, the preferred approach is to create a new regularized architecture, for example `RegularizedWorldCupDDColor`, instead of directly replacing the current model. This would allow comparing the original and regularized versions under the same data split and evaluation protocol.
+The implemented regularization keeps `wcddcolor/model.py` unchanged and is applied directly in `ddcolor_world_cup_team_finetune.ipynb`. This preserves the original fine-tuning experiment and adds a second regularized run with separate checkpoints:
+
+```text
+checkpoint_team_regularized.pt
+best_wcddcolor_team_regularized_tiny.pt
+```
+
+The regularized run starts again from the Hugging Face `piddnad/ddcolor_paper_tiny` checkpoint, not from the already fine-tuned World Cup checkpoint. This makes it a comparable second experiment under the same data split and evaluation protocol.
 
 **Minimal Chroma Regularization**
 
 The first regularization target is the chroma magnitude. Since the model predicts color information from luminance, oversaturation usually means that the predicted `AB` vector has too large a magnitude, even when the selected hue is reasonable.
 
-A minimal architectural change is to apply a final chroma scale after the prediction:
+The notebook applies a final chroma scale after the prediction:
 
-```text
-predicted AB -> chroma scale -> regularized AB
-```
+$$
+\widehat{AB}_{\text{regularized}} = \widehat{AB_{raw}} * 0.8
+$$
 
-For example, a value such as `0.75` or `0.8` can reduce excessive saturation while preserving the model's spatial structure and hue decisions. This is intentionally simple: it does not change the encoder, the decoder, or the team-conditioning path. It only prevents the model from committing too strongly to vivid chroma.
+The selected scale is `0.8`, which reduces excessive saturation while preserving the model's spatial structure and hue decisions. This intentionally does not change the encoder, the decoder, or the team-conditioning path. It only prevents the model from committing too strongly to vivid chroma.
 
-A smoother version can constrain the chroma magnitude instead of scaling every value equally:
+The regularized generator loss also adds a small raw chroma magnitude penalty:
 
-```text
-large AB vectors -> softly reduced
-small AB vectors -> mostly preserved
-```
+$$
+0.01 \cdot \operatorname{mean}\left(\widehat{AB}_{\text{raw}}^2\right)
+$$
 
-This is preferable to hard clipping because it preserves the hue direction and avoids abrupt color artifacts. In both cases, the purpose is not to make the output gray, but to keep color strength closer to historical-looking photographs.
+
+This discourages large chroma predictions before scaling. It is intentionally lighter than hard clipping, so hue direction is preserved and abrupt color artifacts are avoided. The purpose is not to make the output gray, but to keep color strength closer to historical-looking photographs.
 
 **Heavier Model Regularization**
 
-The second target is model capacity. The current scaled model starts from pretrained DDColor weights, freezes the image encoder, freezes the CLIP text encoder, and trains the decoder/refinement path together with the new team-conditioning layers. If the model still overfits, the regularized version can freeze more components and reduce the amount of trainable adaptation.
+The second target is model capacity. The current scaled model starts from pretrained DDColor weights, freezes the image encoder, freezes the CLIP text encoder, and trains the decoder/refinement path together with the new team-conditioning layers. The regularized version freezes more components and reduces the amount of trainable adaptation. The implemented freezing setup is:
 
-A conservative progression is:
+- Freeze image encoder
+- Freeze CLIP text encoder
+- Freeze first two decoder blocks
+- Train remaining decoder/refinement and team-conditioning layers
 
-```text
-stage 1 -> freeze image encoder and CLIP text encoder
-stage 2 -> additionally freeze early decoder blocks
-stage 3 -> train only the final refinement/output head and team projection layers
-```
 
 This keeps most of the pretrained DDColor prior intact. The model can still learn World Cup-specific color hints, but it has less freedom to repaint grass, crowds, and backgrounds with modern or overly saturated colors.
 
-The regularized architecture can also reduce decoder complexity:
+The regularized run also uses **mixed precision training through CUDA AMP** and applies **cosine learning-rate decay** to the generator and discriminator optimizers. These changes are limited to the regularized experiment; the original fine-tuning path keeps its fixed learning rate and full-precision training behavior.
 
-```text
-fewer color queries
-fewer transformer decoder layers
-smaller decoder hidden/feed-forward dimensions
-light dropout in decoder attention and FFN blocks
-```
+These techniques **increased the training speed from around `2.8s/it` to `2.5s/it`, that is around `10.7%`**. Still training is too slow, and a realistic hyperparameter tuning campaign cannot be considered.
 
-For this task, freezing and reducing capacity are preferred over heavy dropout. A small dropout value such as `0.05` can help, especially inside the color decoder, but large dropout may make the colorization unstable or blotchy.
+Visually, the obtained results on the **regularized training campaign are not better that the ones obtained in the non-regularized fine tuning**. Due to the chroma regularization the predicted images lack color intensity even missing to correctly color the grass. The conclusion here may be that the chroma regularization may be too extreme. The time to complete this project is limited so, even if necessary, no additional regularization steps will be performed, this would some interesting future work.
 
-**Regularized Fine-Tuning Strategy**
-
-The recommended first regularized experiment is therefore:
-
-```text
-new model class: RegularizedWorldCupDDColor
-chroma scale: 0.75 - 0.8
-image encoder: frozen
-CLIP text encoder: frozen
-early decoder blocks: frozen or partially frozen
-trainable modules: final refinement head, team projection, optionally last decoder block
-optimizer: AdamW with weight decay
-```
-
-This setup addresses both observed problems. The chroma scale directly reduces oversaturation, while heavier freezing and lower decoder capacity reduce conceptual overfitting and make each experiment cheaper to run. If this version becomes too conservative and produces desaturated predictions, the next step is to unfreeze the last decoder block or raise the chroma scale slightly.
+![Original vs Non Regularized vs Regularized](../assets/original_vs_non_regularized_vs_regularized.png)
 
 ## 8.- Hyperparameter Tuning
 
+The regularized training improved runtime, but full hyperparameter tuning is still too expensive for the available compute budget. To demonstrate the tuning workflow without pretending to run a complete search, the notebook includes a minimal Optuna proof of concept.
+
+The implemented tuning campaign uses only `1%` of the training and validation rows:
+
+```text
+tuning train split: 1%
+tuning validation split: 1%
+epochs per trial: 1
+training batches per trial: 8
+validation batches per trial: 4
+trials: 5
+```
+
+Each trial creates a fresh `WorldCupDDColor` model, initializes it from:
+
+```text
+piddnad/ddcolor_paper_tiny
+```
+
+and freezes the image encoder. To keep the PoC fast, the objective uses only `AB` L1 loss during training and evaluates the trial with validation SSIM. The full GAN, perceptual, and colorfulness losses remain part of the main fine-tuning runs, not the tiny tuning loop.
+
+The Optuna search space is:
+
+```text
+learning rate: 3e-5 to 3e-4
+weight decay: 1e-4 to 5e-2
+chroma scale: 0.6 to 1.1
+frozen decoder blocks: 0 to 2
+```
+
+This proves the core hyperparameter tuning process:
+
+- Define a search space.
+- Train an independent model per trial.
+- Evaluate on held-out validation data.
+- Select the best configuration by validation SSIM.
+- Inspect the trial table with `study.trials_dataframe()`.
+
+Since no custom sampler is configured, Optuna uses its default `TPESampler`. The first trials explore the search space, and later trials are sampled from regions that look more promising according to the observed validation SSIM.
+
+The result should be interpreted only as a workflow proof. A real tuning campaign would need more data, more trials, longer training, and the full training objective.
+
 ## 9.- Final Validation
+
+Final validation is performed after the original and regularized team-conditioned DDColor runs. The notebook evaluates both best checkpoints on the held-out test split:
+
+```text
+best_wcddcolor_team_tiny.pt
+best_wcddcolor_team_regularized_tiny.pt
+```
+
+Both checkpoints are measured with the same metrics used during validation:
+
+```text
+PSNR
+SSIM
+colorfulness
+```
+
+The regularized model is evaluated with the same chroma scale used during training. A compact test grid is also saved for the original fine-tuned checkpoint:
+
+```text
+test_examples_team.png
+```
+
+The grid compares:
+
+```text
+grayscale L input
+predicted colorization
+ground-truth color image
+```
+
+In addition to the held-out dataset split, the notebook performs a small real-image validation using historical World Cup images with team metadata. For each real image, it loads the two team names, runs both the original and regularized checkpoints, and saves the generated predictions separately:
+
+```text
+test_image_predictions_team/
+test_image_predictions_team_regularized/
+```
+
+A visual comparison grid is also saved:
+
+```text
+real_image_validation_team_grid.png
+```
+
+This final step is important because the numerical test split comes from the same modern dataset distribution as training, while the real-image validation better reflects the target use case: old black-and-white World Cup photographs. The final model choice should therefore consider both the held-out metrics and the visual realism of the real-image outputs.
